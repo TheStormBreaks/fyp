@@ -1,0 +1,71 @@
+# Netlify Configuration for SINDy Model Discovery Framework
+# This configures the deployment of the React frontend with serverless functions
+
+[build]
+  command = "npm run build"
+  publish = "dist"
+  functions = "netlify/functions"
+
+[functions]
+  # Python runtime for Netlify Functions
+  node_bundler = "esbuild"
+  included_files = ["**/*.py", "**/requirements.txt"]
+  external_node_modules = ["@netlify/*"]
+
+# SPA redirect - all routes go to index.html
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
+# API routes to Netlify Functions
+[[redirects]]
+  from = "/api/*"
+  to = "/.netlify/functions/api/:splat"
+  status = 200
+
+# Static assets
+[[redirects]]
+  from = "/assets/*"
+  to = "/assets/:splat"
+  status = 200
+
+[[redirects]]
+  from = "/lynx_hare_data.csv"
+  to = "/lynx_hare_data.csv"
+  status = 200
+
+# Build environment
+[build.environment]
+  PYTHON_VERSION = "3.11"
+  NODE_VERSION = "20"
+  NPM_FLAGS = "--legacy-peer-deps"
+
+# Functions environment
+[functions.environment]
+  PYTHON_VERSION = "3.11"
+
+# Headers for security and caching
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Frame-Options = "DENY"
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+    Permissions-Policy = "camera=(), microphone=(), geolocation=()"
+
+[[headers]]
+  for = "/assets/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
+[[headers]]
+  for = "*.csv"
+  [headers.values]
+    Cache-Control = "public, max-age=86400"
+    Content-Type = "text/csv"
+
+# Edge functions for CORS (optional)
+# [edge_functions]
+#   path = "netlify/edge-functions/cors.ts"
+#   pattern = "/api/*"

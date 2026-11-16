@@ -1,0 +1,6 @@
+# Netlify SPA redirects
+# All routes go to index.html for client-side routing
+/*    /index.html   200
+
+# API routes to Netlify Functions
+/api/*  /.netlify/functions/api/:splat  200
