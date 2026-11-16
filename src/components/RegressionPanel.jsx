@@ -68,7 +68,7 @@ function RegressionPanel({ data, results, config, active, loading }) {
   const transpose = (A) => A[0].map((_, i) => A.map(row => row[i]))
 
   const solveLinear = (A, b) => {
-    // Simple Gaussian elimination
+    // Simple Gaussian elimination with singular matrix handling
     const n = A.length
     const M = A.map((row, i) => [...row, b[i][0]])
 
@@ -80,9 +80,13 @@ function RegressionPanel({ data, results, config, active, loading }) {
       }
       [M[i], M[maxRow]] = [M[maxRow], M[i]]
 
-      // Normalize
+      // Normalize - handle near-zero pivots (singular matrix)
       const pivot = M[i][i]
-      if (Math.abs(pivot) < 1e-12) continue
+      if (Math.abs(pivot) < 1e-12) {
+        // Singular or ill-conditioned - set this variable to 0 and continue
+        for (let j = i; j <= n; j++) M[i][j] = 0
+        continue
+      }
       for (let j = i; j <= n; j++) M[i][j] /= pivot
 
       // Eliminate
@@ -193,7 +197,7 @@ function RegressionPanel({ data, results, config, active, loading }) {
     // Zero line
     svg.append('line')
       .attr('x1', 0).attr('x2', width)
-      .attr('y1', y(0)).attr('y2', y(0))
+      .attr('y1', yScale(0)).attr('y2', yScale(0))
       .attr('stroke', 'var(--fg-muted)').attr('stroke-dasharray', '4,4')
 
     // Current threshold line
@@ -214,7 +218,7 @@ function RegressionPanel({ data, results, config, active, loading }) {
     // Lines for each active term
     const line = d3.line()
       .x((d, i) => x(thresholds[i]))
-      .y(d => y(d))
+      .y(d => yScale(d))
       .curve(d3.curveMonotoneX)
       .defined(d => !isNaN(d))
 
@@ -237,7 +241,7 @@ function RegressionPanel({ data, results, config, active, loading }) {
       if (Math.abs(lastVal) > 1e-10) {
         svg.append('text')
           .attr('x', width + 10)
-          .attr('y', y(lastVal) + 4)
+          .attr('y', yScale(lastVal) + 4)
           .attr('fill', color)
           .style('font-size', '10px')
           .style('font-family', 'monospace')
@@ -435,7 +439,7 @@ function RegressionPanel({ data, results, config, active, loading }) {
 
   if (!active) return null
 
-  const equations = results?.model?.equations_raw || []
+  const equations = results?.model?.equationsRaw || results?.model?.equations_raw || []
   const metrics = results?.metrics || {}
 
   return (
@@ -472,9 +476,7 @@ function RegressionPanel({ data, results, config, active, loading }) {
               max="0.5"
               step="0.001"
               value={config.threshold}
-              onChange={(e) => {
-                // This would need to trigger parent config update
-              }}
+              readOnly
               style={{width: '200px'}}
             />
             <span style={{fontFamily: 'monospace', color: 'var(--accent-primary)', minWidth: '60px'}}>
@@ -483,11 +485,11 @@ function RegressionPanel({ data, results, config, active, loading }) {
           </div>
           <div style={{display: 'flex', alignItems: 'center', gap: '0.5rem'}}>
             <label className="label" style={{marginBottom: 0}}>Max Iterations:</label>
-            <input type="number" className="input" value={config.maxIter} min={5} max={100} style={{width: '80px'}} />
+            <input type="number" className="input" value={config.maxIter} min={5} max={100} style={{width: '80px'}} readOnly />
           </div>
           <div style={{display: 'flex', alignItems: 'center', gap: '0.5rem'}}>
             <label className="label" style={{marginBottom: 0}}>Ridge α:</label>
-            <input type="number" className="input" value={1e-3} step={1e-3} min={1e-6} max={1} style={{width: '100px'}} />
+            <input type="number" className="input" value={1e-3} step={1e-3} min={1e-6} max={1} style={{width: '100px'}} readOnly />
           </div>
         </div>
 

@@ -1,18 +1,77 @@
 import React, { useRef, useEffect, useState } from 'react'
-import { Link2, Download, Copy, Check, ExternalLink, RefreshCw, Code, FileText, Share2 } from 'lucide-react'
+import { Link2, Download, Copy, Check, ExternalLink, RefreshCw, Code, FileText, Share2, Database, Target } from 'lucide-react'
 import * as d3 from 'd3'
+
+// Parse SINDy equation string into HTML
+function formatEquationHTML(eq, index) {
+  // eq format: "dHare/dt = 0.2214·x1 + 0.2214·x2 + -0.0584·x1x1x1 + ..."
+  const color = index === 0 ? 'var(--accent-primary)' : 'var(--accent-secondary)';
+
+  // Split LHS and RHS
+  const parts = eq.split('=');
+  if (parts.length !== 2) return eq;
+
+  const lhs = parts[0].trim() + ' =';
+  const rhs = parts[1].trim();
+
+  // Split RHS into terms (split on + or - but keep the sign)
+  // Match: optional sign, number, optional ·, variables
+  const termRegex = /([+-]?)\s*(\d*\.?\d+)?\s*([·*])?\s*([a-zA-Z][a-zA-Z0-9]*(?:[·*][a-zA-Z][a-zA-Z0-9]*)*)/g;
+
+  let html = `<span style="color: ${color}; font-weight: 600">${lhs}</span> `;
+  let lastIndex = 0;
+  let match;
+
+  while ((match = termRegex.exec(rhs)) !== null) {
+    const [full, sign, coeff, multOp, vars] = match;
+
+    // Add any text before this match (should be + or - operators)
+    const before = rhs.slice(lastIndex, match.index);
+    if (before.trim()) {
+      html += before.replace(/([+-])/g, '<span style="color: var(--fg-muted)"> $1 </span>');
+    }
+
+    const signStr = sign || '+';
+    const coeffStr = coeff || '1';
+    const varsStr = vars || '';
+
+    html += `<span style="color: var(--fg-muted)"> ${signStr} </span>`;
+    html += `<span style="color: var(--accent-tertiary); font-weight: 600">${coeffStr}</span>`;
+
+    if (multOp || varsStr) {
+      html += `<span style="color: var(--fg-muted)">·</span>`;
+      if (varsStr) {
+        // Split variables by · or *
+        const varParts = varsStr.split(/[·*]/);
+        html += varParts.map(v => `<span style="color: var(--fg-primary); font-style: italic">${v}</span>`).join('<span style="color: var(--fg-muted)">·</span>');
+      }
+    }
+
+    lastIndex = match.index + full.length;
+  }
+
+  // Add any remaining text
+  const remaining = rhs.slice(lastIndex);
+  if (remaining.trim()) {
+    html += remaining.replace(/([+-])/g, '<span style="color: var(--fg-muted)"> $1 </span>');
+  }
+
+  return html;
+}
 
 function ResultsPanel({ data, results, config, active, loading }) {
   const phaseRef = useRef(null)
   const predictionRef = useRef(null)
-  const [viewMode, setViewMode] = useState('phase') // 'phase' | 'timeseries' | 'residuals'
+  const variableLegendRef = useRef(null)
+  const [viewMode, setViewMode] = useState('phase') // 'phase' | 'timeseries' | 'residuals' | 'legend'
   const [copied, setCopied] = useState(false)
 
   useEffect(() => {
     if (!active || !data || !results) return
     if (viewMode === 'phase') renderPhasePortrait()
     else if (viewMode === 'timeseries') renderTimeSeriesComparison()
-    else renderResiduals()
+    else if (viewMode === 'residuals') renderResiduals()
+    else if (viewMode === 'legend') renderVariableLegend()
   }, [active, data, results, viewMode])
 
   const renderPhasePortrait = () => {
@@ -246,7 +305,7 @@ function ResultsPanel({ data, results, config, active, loading }) {
 
     // Legend
     const legend = svg.append('g').attr('transform', `translate(${width - 120}, 20)`)
-    items = [
+    const items = [
       { label: 'Hare (obs.)', color: 'var(--accent-primary)' },
       { label: 'Lynx (obs.)', color: 'var(--accent-secondary)' }
     ]
@@ -326,8 +385,257 @@ function ResultsPanel({ data, results, config, active, loading }) {
       .text('Residual Analysis: True vs Predicted Derivatives')
   }
 
+  const renderVariableLegend = () => {
+    const container = variableLegendRef.current
+    if (!container) return
+
+    d3.select(container).selectAll('*').remove()
+
+    const margin = { top: 20, right: 20, bottom: 20, left: 20 }
+    const width = container.clientWidth - margin.left - margin.right
+    const height = 400 - margin.top - margin.bottom
+
+    const svg = d3.select(container)
+      .append('svg')
+      .attr('width', '100%')
+      .attr('height', '100%')
+      .attr('viewBox', `0 0 ${width + margin.left + margin.right} ${height + margin.top + margin.bottom}`)
+      .append('g')
+      .attr('transform', `translate(${margin.left},${margin.top})`)
+
+    // Variable definitions based on the Hudson Bay Lynx-Hare dataset
+    const variables = [
+      {
+        symbol: 'x₁ (or H)',
+        name: 'Hare Population',
+        description: 'Prey species population (snowshoe hare)',
+        units: 'Thousands of pelts (proxy for population)',
+        role: 'Prey',
+        roleColor: 'var(--accent-primary)',
+        equation: 'dx₁/dt = α·x₁ - β·x₁·x₂',
+        color: 'var(--accent-primary)'
+      },
+      {
+        symbol: 'x₂ (or L)',
+        name: 'Lynx Population',
+        description: 'Predator species population (Canada lynx)',
+        units: 'Thousands of pelts (proxy for population)',
+        role: 'Predator',
+        roleColor: 'var(--accent-secondary)',
+        equation: 'dx₂/dt = δ·x₁·x₂ - γ·x₂',
+        color: 'var(--accent-secondary)'
+      }
+    ]
+
+    // Parameters in Lotka-Volterra
+    const parameters = [
+      { symbol: 'α (alpha)', name: 'Prey growth rate', description: 'Intrinsic growth rate of hare population in absence of predators', units: '1/year', typical: '~0.5-1.0' },
+      { symbol: 'β (beta)', name: 'Predation rate', description: 'Rate at which predators consume prey per encounter', units: '1/(k pelts·year)', typical: '~0.01-0.05' },
+      { symbol: 'γ (gamma)', name: 'Predator death rate', description: 'Natural death rate of lynx in absence of prey', units: '1/year', typical: '~0.5-1.0' },
+      { symbol: 'δ (delta)', name: 'Predator efficiency', description: 'Conversion efficiency of consumed prey into predator births', units: '1/(k pelts·year)', typical: '~0.01-0.05' }
+    ]
+
+    let yPos = 0
+    const rowHeight = 130
+    const colWidth = width / 2 - 20
+
+    // Render variable cards
+    variables.forEach((v, i) => {
+      const col = i % 2
+      const row = Math.floor(i / 2)
+      const x = col * (colWidth + 40)
+      const y = row * rowHeight
+
+      const card = svg.append('g')
+        .attr('transform', `translate(${x}, ${y})`)
+
+      // Card background
+      card.append('rect')
+        .attr('width', colWidth)
+        .attr('height', rowHeight - 20)
+        .attr('rx', 8)
+        .attr('fill', 'var(--bg-tertiary)')
+        .attr('stroke', v.color)
+        .attr('stroke-width', 2)
+
+      // Role badge
+      card.append('rect')
+        .attr('x', colWidth - 80)
+        .attr('y', -8)
+        .attr('width', 70)
+        .attr('height', 24)
+        .attr('rx', 12)
+        .attr('fill', v.roleColor)
+        .attr('opacity', 0.2)
+
+      card.append('text')
+        .attr('x', colWidth - 45)
+        .attr('y', 8)
+        .attr('text-anchor', 'middle')
+        .attr('fill', v.roleColor)
+        .style('font-size', '10px')
+        .style('font-weight', '700')
+        .text(v.role)
+
+      // Symbol
+      card.append('text')
+        .attr('x', 15)
+        .attr('y', 25)
+        .attr('fill', v.color)
+        .style('font-size', '20px')
+        .style('font-weight', '700')
+        .style('font-family', 'Georgia, serif')
+        .text(v.symbol)
+
+      // Name
+      card.append('text')
+        .attr('x', 15)
+        .attr('y', 50)
+        .attr('fill', 'var(--fg-primary)')
+        .style('font-size', '14px')
+        .style('font-weight', '600')
+        .text(v.name)
+
+      // Description
+      card.append('text')
+        .attr('x', 15)
+        .attr('y', 70)
+        .attr('fill', 'var(--fg-secondary)')
+        .style('font-size', '11px')
+        .text(v.description)
+
+      // Units
+      card.append('text')
+        .attr('x', 15)
+        .attr('y', 88)
+        .attr('fill', 'var(--fg-muted)')
+        .style('font-size', '10px')
+        .style('font-style', 'italic')
+        .text(`Units: ${v.units}`)
+
+      // Equation
+      card.append('text')
+        .attr('x', 15)
+        .attr('y', 108)
+        .attr('fill', v.color)
+        .style('font-size', '11px')
+        .style('font-family', 'monospace')
+        .text(v.equation)
+    })
+
+    yPos = variables.length / 2 * rowHeight + 40
+
+    // Parameters section header
+    svg.append('text')
+      .attr('x', 0)
+      .attr('y', yPos)
+      .attr('fill', 'var(--fg-primary)')
+      .style('font-size', '16px')
+      .style('font-weight', '700')
+      .text('Lotka-Volterra Parameters')
+
+    yPos += 30
+
+    // Render parameter table
+    const tableX = 0
+    const colWidths = [80, 140, 300, 80, 100]
+    const headers = ['Symbol', 'Name', 'Description', 'Units', 'Typical Range']
+
+    // Table header
+    let xPos = tableX
+    headers.forEach((header, i) => {
+      svg.append('rect')
+        .attr('x', xPos)
+        .attr('y', yPos)
+        .attr('width', colWidths[i])
+        .attr('height', 30)
+        .attr('fill', 'var(--accent-primary)')
+        .attr('opacity', 0.1)
+        .attr('stroke', 'var(--accent-primary)')
+        .attr('stroke-width', 1)
+
+      svg.append('text')
+        .attr('x', xPos + colWidths[i] / 2)
+        .attr('y', yPos + 20)
+        .attr('text-anchor', 'middle')
+        .attr('fill', 'var(--accent-primary)')
+        .style('font-size', '11px')
+        .style('font-weight', '600')
+        .text(header)
+
+      xPos += colWidths[i]
+    })
+
+    yPos += 30
+
+    // Table rows
+    parameters.forEach((p, i) => {
+      xPos = tableX
+      const rowColor = i % 2 === 0 ? 'var(--bg-tertiary)' : 'var(--bg-secondary)'
+
+      // Background
+      svg.append('rect')
+        .attr('x', tableX)
+        .attr('y', yPos)
+        .attr('width', colWidths.reduce((a, b) => a + b, 0))
+        .attr('height', 28)
+        .attr('fill', rowColor)
+
+      const values = [p.symbol, p.name, p.description, p.units, p.typical]
+      values.forEach((val, j) => {
+        svg.append('text')
+          .attr('x', xPos + (j === 0 ? 8 : colWidths[j] / 2))
+          .attr('y', yPos + 18)
+          .attr('text-anchor', j === 0 ? 'start' : j === 2 ? 'start' : 'middle')
+          .attr('fill', j === 0 ? 'var(--accent-primary)' : 'var(--fg-secondary)')
+          .style('font-size', '10px')
+          .style('font-family', j === 0 ? 'monospace' : 'inherit')
+          .style('font-weight', j === 0 ? '600' : '400')
+          .text(val)
+        xPos += colWidths[j]
+      })
+
+      yPos += 28
+    })
+
+    // Add a note about SINDy discovery
+    yPos += 20
+    svg.append('text')
+      .attr('x', 0)
+      .attr('y', yPos)
+      .attr('fill', 'var(--fg-muted)')
+      .style('font-size', '11px')
+      .style('font-style', 'italic')
+      .text('Note: SINDy discovers the active terms and their coefficients from data. The classic Lotka-Volterra model has 4 parameters (α, β, γ, δ).')
+
+    // Add SINDy-specific note
+    yPos += 20
+    const equations = results?.model?.equationsRaw || results?.model?.equations_raw || []
+    if (equations.length > 0) {
+      svg.append('text')
+        .attr('x', 0)
+        .attr('y', yPos)
+        .attr('fill', 'var(--accent-tertiary)')
+        .style('font-size', '12px')
+        .style('font-weight', '600')
+        .text('SINDy Discovered Equations:')
+
+      yPos += 22
+      equations.forEach((eq, i) => {
+        svg.append('text')
+          .attr('x', 10)
+          .attr('y', yPos)
+          .attr('fill', i === 0 ? 'var(--accent-primary)' : 'var(--accent-secondary)')
+          .style('font-size', '11px')
+          .style('font-family', 'monospace')
+          .text(eq)
+        yPos += 18
+      })
+    }
+  }
+
   const copyLaTeX = () => {
-    const equations = results?.model?.equations_raw || []
+    const equations = results?.model?.equationsRaw || results?.model?.equations_raw || []
     const latex = equations.map(eq => eq.replace(/d(\w+)\/dt = /, '\\frac{d$1}{dt} = ').replace(/\*/g, '\\cdot ')).join('\\\\')
     navigator.clipboard.writeText(latex)
     setCopied(true)
@@ -355,9 +663,16 @@ function ResultsPanel({ data, results, config, active, loading }) {
 
   if (!active) return null
 
-  const equations = results?.model?.equations_raw || []
-  const metrics = results?.metrics || {}
+  const equations = results?.model?.equationsRaw || results?.model?.equations_raw || []
+  const rawMetrics = results?.metrics || {}
   const summary = results?.summary || {}
+  const featureNames = results?.data?.featureNames || ['Hare', 'Lynx']
+
+  // Map feature_0, feature_1 to named metrics
+  const metrics = {}
+  featureNames.forEach((name, i) => {
+    metrics[name] = rawMetrics[`feature_${i}`] || {}
+  })
 
   return (
     <div className="panel active" role="tabpanel" aria-label="Final Results">
@@ -384,11 +699,8 @@ function ResultsPanel({ data, results, config, active, loading }) {
           </h4>
           <div className="equation-block" style={{fontSize: '1.2rem', lineHeight: '2.5'}}>
             {equations.map((eq, i) => (
-              <div key={i} style={{marginBottom: '0.5rem'}}>
-                {eq.replace(/d(\w+)\/dt = /, (match, v) =>
-                  `<span style="color: ${i === 0 ? 'var(--accent-primary)' : 'var(--accent-secondary)'}">${match}</span>`
-                )}
-              </div>
+              <div key={i} style={{marginBottom: '0.5rem'}}
+                dangerouslySetInnerHTML={{ __html: formatEquationHTML(eq, i) }} />
             ))}
           </div>
           <div style={{fontSize: '0.85rem', color: 'var(--fg-muted)', fontFamily: 'monospace'}}>
@@ -455,12 +767,21 @@ function ResultsPanel({ data, results, config, active, loading }) {
             >
               Residuals
             </button>
+            <button
+              className={`tab ${viewMode === 'legend' ? 'active' : ''}`}
+              onClick={() => setViewMode('legend')}
+              role="tab"
+            >
+              <Database className="w-4 h-4" style={{marginRight: '0.25rem'}} />
+              Variable Legend
+            </button>
           </div>
         </div>
 
         <div className="chart-container" style={{height: '420px', position: 'relative'}}>
-          {viewMode === 'phase' && <div ref={phaseRef} style={{width: '100%', height: '100%'}} />}
-          {viewMode !== 'phase' && <div ref={predictionRef} style={{width: '100%', height: '100%'}} />}
+          <div ref={phaseRef} style={{width: '100%', height: '100%', display: viewMode === 'phase' ? 'block' : 'none'}} />
+          <div ref={predictionRef} style={{width: '100%', height: '100%', display: (viewMode === 'timeseries' || viewMode === 'residuals') ? 'block' : 'none'}} />
+          <div ref={variableLegendRef} style={{width: '100%', height: '100%', display: viewMode === 'legend' ? 'block' : 'none'}} />
         </div>
       </div>
 

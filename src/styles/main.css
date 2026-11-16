@@ -66,6 +66,22 @@ body {
   flex-direction: column;
 }
 
+/* Main content layout - accounts for sticky header/footer */
+.main-content {
+  flex: 1;
+  padding-top: 1rem; /* space below sticky header */
+  padding-bottom: 2rem; /* space above footer */
+}
+
+/* Panels container */
+.panels {
+  min-height: 500px;
+  margin-bottom: 2rem;
+}
+
+/* Sticky header is handled in Header.jsx with z-index: 100 */
+/* Sticky equation display is handled in EquationDisplay.jsx with z-index: 50 */
+
 /* Typography */
 h1, h2, h3, h4, h5, h6 {
   font-weight: 600;

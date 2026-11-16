@@ -1,5 +1,5 @@
 import React, { useRef, useEffect, useState } from 'react'
-import { Download, Eye, Code, Table } from 'lucide-react'
+import { Download, Eye, Code, Table, Database, Info } from 'lucide-react'
 import * as d3 from 'd3'
 
 function DataPanel({ data, results, active, loading }) {
@@ -336,14 +336,14 @@ function DataPanel({ data, results, active, loading }) {
                 The Lotka-Volterra predator-prey model:
               </p>
               <div className="equation-block" style={{fontSize: '1rem'}}>
-                <span className="katex">\\frac{dH}{dt} = \\alpha H - \\beta H L</span>
+                <div dangerouslySetInnerHTML={{__html: '\\frac{dH}{dt} = \\alpha H - \\beta H L'}} />
                 <br />
-                <span className="katex">\\frac{dL}{dt} = \\delta H L - \\gamma L</span>
+                <div dangerouslySetInnerHTML={{__html: '\\frac{dL}{dt} = \\delta H L - \\gamma L'}} />
               </div>
               <p style={{fontSize: '0.8rem', color: 'var(--fg-muted)', marginTop: '0.5rem'}}>
                 H = Hare (prey), L = Lynx (predator)<br/>
-                α = prey growth, β = predation rate<br/>
-                δ = predator growth from prey, γ = predator death
+                α (alpha) = prey growth, β (beta) = predation rate<br/>
+                δ (delta) = predator growth from prey, γ (gamma) = predator death
               </p>
             </div>
             <div>

@@ -272,9 +272,16 @@ function ModelSelectionPanel({ data, results, config, active, loading }) {
 
   if (!active) return null
 
-  const equations = results?.model?.equations_raw || []
-  const metrics = results?.metrics || {}
+  const equations = results?.model?.equationsRaw || results?.model?.equations_raw || []
+  const rawMetrics = results?.metrics || {}
   const summary = results?.summary || {}
+  const featureNames = results?.data?.featureNames || ['Hare', 'Lynx']
+
+  // Map feature_0, feature_1 to named metrics
+  const metrics = {}
+  featureNames.forEach((name, i) => {
+    metrics[name] = rawMetrics[`feature_${i}`] || {}
+  })
 
   return (
     <div className="panel active" role="tabpanel" aria-label="Model Selection">

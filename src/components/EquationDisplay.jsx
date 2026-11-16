@@ -1,6 +1,44 @@
 import React, { useState } from 'react'
 import { Copy, Check, Code, Eye, Minus, Plus, Download } from 'lucide-react'
 
+// Parse SINDy equation string into HTML
+function formatEquationHTML(eq, index) {
+  const color = index === 0 ? 'var(--accent-primary)' : 'var(--accent-secondary)';
+  const parts = eq.split('=');
+  if (parts.length !== 2) return eq;
+  const lhs = parts[0].trim() + ' =';
+  const rhs = parts[1].trim();
+  const termRegex = /([+-]?)\s*(\d*\.?\d+)?\s*([·*])?\s*([a-zA-Z][a-zA-Z0-9]*(?:[·*][a-zA-Z][a-zA-Z0-9]*)*)/g;
+  let html = `<span style="color: ${color}; font-weight: 600">${lhs}</span> `;
+  let lastIndex = 0;
+  let match;
+  while ((match = termRegex.exec(rhs)) !== null) {
+    const [full, sign, coeff, multOp, vars] = match;
+    const before = rhs.slice(lastIndex, match.index);
+    if (before.trim()) {
+      html += before.replace(/([+-])/g, '<span style="color: var(--fg-muted)"> $1 </span>');
+    }
+    const signStr = sign || '+';
+    const coeffStr = coeff || '1';
+    const varsStr = vars || '';
+    html += `<span style="color: var(--fg-muted)"> ${signStr} </span>`;
+    html += `<span style="color: var(--accent-tertiary); font-weight: 600">${coeffStr}</span>`;
+    if (multOp || varsStr) {
+      html += `<span style="color: var(--fg-muted)">·</span>`;
+      if (varsStr) {
+        const varParts = varsStr.split(/[·*]/);
+        html += varParts.map(v => `<span style="color: var(--fg-primary); font-style: italic">${v}</span>`).join('<span style="color: var(--fg-muted)">·</span>');
+      }
+    }
+    lastIndex = match.index + full.length;
+  }
+  const remaining = rhs.slice(lastIndex);
+  if (remaining.trim()) {
+    html += remaining.replace(/([+-])/g, '<span style="color: var(--fg-muted)"> $1 </span>');
+  }
+  return html;
+}
+
 function EquationDisplay({ results, config }) {
   const [expanded, setExpanded] = useState(true)
   const [copied, setCopied] = useState(false)
@@ -8,9 +46,16 @@ function EquationDisplay({ results, config }) {
 
   if (!results) return null
 
-  const equations = results.model?.equations_raw || []
-  const metrics = results.metrics || {}
+  const equations = results.model?.equationsRaw || results.model?.equations_raw || []
+  const rawMetrics = results.metrics || {}
   const summary = results.summary || {}
+  const featureNames = results.data?.featureNames || ['Hare', 'Lynx']
+
+  // Map feature_0, feature_1 to named metrics
+  const metrics = {}
+  featureNames.forEach((name, i) => {
+    metrics[name] = rawMetrics[`feature_${i}`] || {}
+  })
 
   const copyToClipboard = (text) => {
     navigator.clipboard.writeText(text)
@@ -33,11 +78,8 @@ function EquationDisplay({ results, config }) {
 
   return (
     <div className="equation-display" style={{
-      position: 'sticky',
-      bottom: 0,
-      zIndex: 50,
-      background: 'linear-gradient(180deg, transparent, var(--bg-primary) 20%)',
-      paddingTop: '1rem'
+      paddingTop: '2rem',
+      paddingBottom: '2rem'
     }}>
       <div className="container">
         <div className="card" style={{
@@ -124,13 +166,7 @@ function EquationDisplay({ results, config }) {
                     }}>
                       d{['Hare', 'Lynx'][i]}/dt
                     </div>
-                    <div dangerouslySetInnerHTML={{
-                      __html: eq
-                        .replace(/d(\w+)\/dt = /, (match) => `<span style="color: ${i === 0 ? 'var(--accent-primary)' : 'var(--accent-secondary)'}; font-weight: 600">${match}</span>`)
-                        .replace(/\*/g, '<span style="color: var(--fg-muted)">·</span>')
-                        .replace(/([+-])\s*(\d+\.?\d*)/g, '$1 <span style="color: var(--accent-tertiary); font-weight: 600">$2</span>')
-                        .replace(/([a-zA-Z]+)(\d*)/g, '<span style="color: var(--fg-primary); font-style: italic">$1$2</span>')
-                    }} />
+                    <div dangerouslySetInnerHTML={{ __html: formatEquationHTML(eq, i) }} />
                   </div>
                 ))}
               </div>

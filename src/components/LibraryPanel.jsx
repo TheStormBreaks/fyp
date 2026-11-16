@@ -1,5 +1,5 @@
 import React, { useRef, useEffect, useState } from 'react'
-import { Search, ChevronDown, ChevronUp, Filter, X, Check, Minus, Plus } from 'lucide-react'
+import { Search, ChevronDown, ChevronUp, Filter, X, Check, Minus, Plus, Info } from 'lucide-react'
 import * as d3 from 'd3'
 
 function LibraryPanel({ data, results, config, active, loading }) {
