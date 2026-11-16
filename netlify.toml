@@ -12,13 +12,7 @@
   included_files = ["**/*.py", "**/requirements.txt"]
   external_node_modules = ["@netlify/*"]
 
-# SPA redirect - all routes go to index.html
-[[redirects]]
-  from = "/*"
-  to = "/index.html"
-  status = 200
-
-# API routes to Netlify Functions
+# API routes to Netlify Functions (specific first)
 [[redirects]]
   from = "/api/*"
   to = "/.netlify/functions/api/:splat"
@@ -33,6 +27,12 @@
 [[redirects]]
   from = "/lynx_hare_data.csv"
   to = "/lynx_hare_data.csv"
+  status = 200
+
+# SPA redirect - all routes go to index.html (catch-all LAST)
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
   status = 200
 
 # Build environment
