@@ -1,6 +1,27 @@
 import React, { useRef, useEffect, useState } from 'react'
 import { Download, Eye, Code, Table, Database, Info } from 'lucide-react'
 import * as d3 from 'd3'
+import katex from 'katex'
+
+// KatexEquation component for rendering LaTeX with KaTeX
+function KatexEquation({ latex }) {
+  const ref = useRef(null)
+  useEffect(() => {
+    if (ref.current && latex) {
+      try {
+        katex.render(latex, ref.current, {
+          throwOnError: false,
+          displayMode: true,
+          strict: false
+        })
+      } catch (e) {
+        console.warn('KaTeX render error:', e)
+        ref.current.textContent = latex
+      }
+    }
+  }, [latex])
+  return <div ref={ref} style={{overflow: 'auto'}} />
+}
 
 function DataPanel({ data, results, active, loading }) {
   const chartRef = useRef(null)
@@ -336,9 +357,9 @@ function DataPanel({ data, results, active, loading }) {
                 The Lotka-Volterra predator-prey model:
               </p>
               <div className="equation-block" style={{fontSize: '1rem'}}>
-                <div dangerouslySetInnerHTML={{__html: '\\frac{dH}{dt} = \\alpha H - \\beta H L'}} />
+                <KatexEquation latex="\\frac{dH}{dt} = \\alpha H - \\beta H L" />
                 <br />
-                <div dangerouslySetInnerHTML={{__html: '\\frac{dL}{dt} = \\delta H L - \\gamma L'}} />
+                <KatexEquation latex="\\frac{dL}{dt} = \\delta H L - \\gamma L" />
               </div>
               <p style={{fontSize: '0.8rem', color: 'var(--fg-muted)', marginTop: '0.5rem'}}>
                 H = Hare (prey), L = Lynx (predator)<br/>

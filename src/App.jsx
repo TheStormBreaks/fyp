@@ -3,7 +3,7 @@ import {
   Play, Pause, RefreshCw, Download, Upload,
   Brain, Database, Zap, Search, Filter,
   ChevronDown, ChevronUp, Settings, Info,
-  Link2, Github, ExternalLink
+  Link2, Github, ExternalLink, BookOpen
 } from 'lucide-react'
 import Header from './components/Header'
 import DataPanel from './components/DataPanel'
@@ -12,6 +12,7 @@ import LibraryPanel from './components/LibraryPanel'
 import RegressionPanel from './components/RegressionPanel'
 import ModelSelectionPanel from './components/ModelSelectionPanel'
 import ResultsPanel from './components/ResultsPanel'
+import MethodologyPanel from './components/MethodologyPanel'
 import EquationDisplay from './components/EquationDisplay'
 import Footer from './components/Footer'
 import { runSINDyAnalysis } from './algorithms/sindy'
@@ -34,12 +35,13 @@ function App() {
   const [showConfig, setShowConfig] = useState(false)
 
   const steps = [
-    { id: 'data', label: 'Data', icon: Database },
-    { id: 'preprocessing', label: 'Preprocess', icon: Filter },
-    { id: 'library', label: 'Library', icon: Search },
-    { id: 'regression', label: 'Regression', icon: Zap },
-    { id: 'selection', label: 'Selection', icon: Brain },
-    { id: 'results', label: 'Results', icon: Link2 }
+    { id: 'methodology', label: 'Framework Overview', icon: BookOpen, desc: 'System design, objectives, SDG alignment, methodology' },
+    { id: 'data', label: 'Data Ingestion', icon: Database, desc: 'Time-series & spatiotemporal datasets' },
+    { id: 'preprocessing', label: 'Preprocessing & Derivative Consensus', icon: Filter, desc: 'Multi-method differentiation (FD, SG, Splines) + normalization' },
+    { id: 'library', label: 'Feature Library & Coherence', icon: Search, desc: 'Polynomials, trigonometric, interactions + Gram-Schmidt (μ>0.7)' },
+    { id: 'regression', label: 'Sparse & Symbolic Discovery', icon: Zap, desc: 'STLSQ + PySR fallback across log-spaced λ grid' },
+    { id: 'selection', label: 'Multi-Criteria Model Selection', icon: Brain, desc: 'AIC, BIC, CV, Pareto knee, Bootstrap stability (π>0.9)' },
+    { id: 'results', label: 'Dynamical Validation & Equations', icon: Link2, desc: 'RK4 integration, parameter estimation, uncertainty quantification' }
   ]
 
   // Load initial data
@@ -78,7 +80,7 @@ function App() {
 
   useEffect(() => {
     if (data && !loading) {
-      const timer = setTimeout(runAnalysis, 300)
+      const timer = setTimeout(runAnalysis, 100)
       return () => clearTimeout(timer)
     }
   }, [config, data, loading, runAnalysis])
@@ -148,11 +150,13 @@ function App() {
                   onClick={() => handleStepClick(index)}
                   aria-current={index === currentStep ? 'step' : undefined}
                   disabled={loading}
+                  title={step.desc}
                 >
                   <div className="step-circle">
                     {index < currentStep ? '✓' : index + 1}
                   </div>
                   <span className="step-label">{step.label}</span>
+                  {step.desc && <span className="step-desc">{step.desc}</span>}
                 </button>
               ))}
             </div>
@@ -186,45 +190,50 @@ function App() {
 
           {/* Panels - only render active panel for performance */}
           <div className="panels" style={{minHeight: '500px'}}>
+            <MethodologyPanel
+              active={currentStep === 0}
+              loading={loading}
+            />
             <DataPanel
               data={data}
               results={analysisResults}
-              active={currentStep === 0}
+              active={currentStep === 1}
               loading={loading}
             />
             <PreprocessingPanel
               data={data}
               results={analysisResults}
-              active={currentStep === 1}
+              active={currentStep === 2}
               loading={loading}
             />
             <LibraryPanel
               data={data}
               results={analysisResults}
               config={config}
-              active={currentStep === 2}
+              active={currentStep === 3}
               loading={loading}
             />
             <RegressionPanel
               data={data}
               results={analysisResults}
               config={config}
-              active={currentStep === 3}
+              active={currentStep === 4}
               loading={loading}
             />
             <ModelSelectionPanel
               data={data}
               results={analysisResults}
               config={config}
-              active={currentStep === 4}
+              active={currentStep === 5}
               loading={loading}
             />
             <ResultsPanel
               data={data}
               results={analysisResults}
               config={config}
-              active={currentStep === 5}
+              active={currentStep === 6}
               loading={loading}
+              onThresholdChange={(threshold) => handleConfigChange('threshold', threshold)}
             />
           </div>
 

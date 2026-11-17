@@ -341,6 +341,51 @@ export class SINDy {
   }
 
   /**
+   * Integrate ODE using RK4 from initial conditions
+   * @param {number[]} x0 - Initial state
+   * @param {number[]} t - Time points
+   * @returns {number[][]} Integrated trajectory
+   */
+  integrate(x0, t) {
+    const nSteps = t.length;
+    const nFeatures = x0.length;
+    const trajectory = Array(nSteps).fill().map(() => Array(nFeatures).fill(0));
+    trajectory[0] = [...x0];
+
+    // Helper to compute dx/dt at a given state
+    const computeDerivatives = (x) => {
+      const { Theta } = this.buildLibrary([x]);
+      const derivs = Array(nFeatures).fill(0);
+      for (let j = 0; j < nFeatures; j++) {
+        let sum = 0;
+        for (let k = 0; k < Theta[0].length; k++) {
+          sum += Theta[0][k] * this.coefficients[j][k];
+        }
+        derivs[j] = sum;
+      }
+      return derivs;
+    };
+
+    // RK4 integration
+    for (let i = 0; i < nSteps - 1; i++) {
+      const dt = t[i + 1] - t[i];
+      const x = trajectory[i];
+
+      const k1 = computeDerivatives(x);
+      const x2 = x.map((v, j) => v + 0.5 * dt * k1[j]);
+      const k2 = computeDerivatives(x2);
+      const x3 = x.map((v, j) => v + 0.5 * dt * k2[j]);
+      const k3 = computeDerivatives(x3);
+      const x4 = x.map((v, j) => v + dt * k3[j]);
+      const k4 = computeDerivatives(x4);
+
+      trajectory[i + 1] = x.map((v, j) => v + (dt / 6) * (k1[j] + 2 * k2[j] + 2 * k3[j] + k4[j]));
+    }
+
+    return trajectory;
+  }
+
+  /**
    * Get equations as human-readable strings
    * @param {string[]} featureNames - Names of state variables
    * @param {number} precision - Decimal precision
@@ -513,49 +558,98 @@ export async function runSINDyAnalysis(data, featureNames, config = {}) {
   const t = data.map(d => d.Year);
   const X = data.map(d => featureNames.map(f => d[f]));
 
-  // Normalize if requested
-  let XWork = X;
+  // Train/Test temporal split (70/30)
+  const trainRatio = cfg.trainTestRatio || 0.7;
+  const nTotal = t.length;
+  const nTrain = Math.floor(nTotal * trainRatio);
+
+  // Split indices
+  const trainIndices = Array.from({ length: nTrain }, (_, i) => i);
+  const testIndices = Array.from({ length: nTotal - nTrain }, (_, i) => nTrain + i);
+
+  // Split data
+  const tTrain = trainIndices.map(i => t[i]);
+  const XTrain = trainIndices.map(i => X[i]);
+  const tTest = testIndices.map(i => t[i]);
+  const XTest = testIndices.map(i => X[i]);
+
+  // Normalize if requested (using training data statistics)
+  let XWork = XTrain;
+  let XTestNorm = XTest;
   let normInfo = null;
   if (cfg.normalizeData) {
-    const result = normalizeData(X);
+    const result = normalizeData(XTrain);
     XWork = result.XNorm;
     normInfo = { means: result.means, stds: result.stds };
+    // Normalize test data with training statistics
+    XTestNorm = XTest.map(row => row.map((val, j) => (val - result.means[j]) / result.stds[j]));
   }
 
-  // Run SINDy
+  // Run SINDy on TRAINING data only
   const model = new SINDy(cfg);
-  model.fit(XWork, t);
+  model.fit(XWork, tTrain);
 
-  // Predict
-  const dXdtPred = model.predict(XWork);
-  const dXdtTrue = model.computeDerivatives(XWork, t, cfg.derivativeMethod);
+  // Predict on training data
+  const dXdtPredTrain = model.predict(XWork);
+  const dXdtTrueTrain = model.computeDerivatives(XWork, tTrain, cfg.derivativeMethod);
 
-  // Compute metrics
-  const metrics = model.computeMetrics(XWork, t, dXdtTrue, dXdtPred);
+  // Predict on test data (for validation)
+  const dXdtPredTest = model.predict(XTestNorm);
+  const dXdtTrueTest = model.computeDerivatives(XTestNorm, tTest, cfg.derivativeMethod);
+
+  // Compute metrics on training data
+  const metrics = model.computeMetrics(XWork, tTrain, dXdtTrueTrain, dXdtPredTrain);
 
   // Get equations
   const equations = model.equations(featureNames);
 
-  // Coefficient paths for visualization
+  // Coefficient paths for visualization (on training data)
   const thresholds = Array.from({ length: 20 }, (_, i) => Math.pow(10, -3 + i * 0.15));
   const { Theta } = model.buildLibrary(XWork);
   const coefPaths = [];
   for (let j = 0; j < XWork[0].length; j++) {
-    const y = dXdtTrue.map(row => row[j]);
+    const y = dXdtTrueTrain.map(row => row[j]);
     coefPaths.push(model.stlsqPath(Theta, y, thresholds));
   }
+
+  // Also get predictions for full trajectory (for time series plotting)
+  // We need to run the model on the full dataset for visualization
+  let XFull = X;
+  let XFullNorm = X;
+  if (cfg.normalizeData) {
+    const result = normalizeData(X);
+    XFullNorm = result.XNorm;
+  }
+  const modelFull = new SINDy(cfg);
+  modelFull.fit(XFullNorm, t);
+  const dXdtPredFull = modelFull.predict(XFullNorm);
+  const dXdtTrueFull = modelFull.computeDerivatives(XFullNorm, t, cfg.derivativeMethod);
+
+  // Test set predictions for ODE integration (using the model trained on train data)
+  // For the validation tab, we need to integrate the ODE from initial conditions
+  const X0Test = XTestNorm[0];
+  const XPredTest = model.integrate(X0Test, tTest);
+  const predData = {
+    t_pred: tTest,
+    X_pred: XPredTest
+  };
 
   return {
     data: {
       t,
       X,
       featureNames,
-      dXdtTrue,
-      dXdtPred
+      dXdtTrue: dXdtTrueFull,
+      dXdtPred: dXdtPredFull,
+      // Train/test splits for validation
+      t_train: tTrain,
+      X_train: XTrain,
+      t_test: tTest,
+      X_test: XTest
     },
     model: {
       equationsRaw: equations,
-      equationsNormalized: equations, // Same for now
+      equationsNormalized: equations,
       coefficients: model.coefficients,
       libraryTerms: model.libraryTerms,
       libraryNames: model.libraryNames,
@@ -564,6 +658,7 @@ export async function runSINDyAnalysis(data, featureNames, config = {}) {
       derivativeMethod: cfg.derivativeMethod
     },
     metrics,
+    prediction: predData, // For ODE validation
     visualization: {
       libraryMatrix: Theta,
       coefficientPaths: {

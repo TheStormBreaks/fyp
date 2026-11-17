@@ -422,6 +422,28 @@ code, pre {
   color: var(--success);
 }
 
+.step-desc {
+  font-size: 0.6rem;
+  color: var(--fg-muted);
+  text-align: center;
+  max-width: 100px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  opacity: 0;
+  transition: opacity var(--transition);
+}
+
+.step:hover .step-desc,
+.step.active .step-desc {
+  opacity: 1;
+}
+
+.step.active .step-desc {
+  color: var(--accent-primary);
+  font-weight: 500;
+}
+
 /* Equation Display */
 .equation-block {
   background: var(--bg-tertiary);

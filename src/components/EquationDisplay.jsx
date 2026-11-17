@@ -1,7 +1,58 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import { Copy, Check, Code, Eye, Minus, Plus, Download } from 'lucide-react'
+import katex from 'katex'
 
-// Parse SINDy equation string into HTML
+// KatexEquation component for rendering LaTeX with KaTeX
+function KatexEquation({ latex }) {
+  const ref = useRef(null)
+  useEffect(() => {
+    if (ref.current && latex) {
+      try {
+        katex.render(latex, ref.current, {
+          throwOnError: false,
+          displayMode: true,
+          strict: false
+        })
+      } catch (e) {
+        console.warn('KaTeX render error:', e)
+        ref.current.textContent = latex
+      }
+    }
+  }, [latex])
+  return <div ref={ref} style={{overflow: 'auto'}} />
+}
+
+// Parse SINDy equation string into LaTeX
+function parseEquationToLatex(eq) {
+  // eq format: "dHare/dt = 0.2214·x1 + 0.2214·x2 + -0.0584·x1x1x1 + ..."
+  const parts = eq.split('=');
+  if (parts.length !== 2) return eq;
+  const lhs = parts[0].trim();
+  const rhs = parts[1].trim();
+
+  // Convert RHS to LaTeX
+  // Replace · with \cdot
+  let latex = rhs
+    .replace(/·/g, '\\cdot ')
+    .replace(/\*/g, '\\cdot ')
+    // Replace variable names like x1, x2 with x_1, x_2
+    .replace(/x(\d+)/g, 'x_{$1}')
+    // Replace variable combinations like x1x2 with x_1 x_2
+    .replace(/x_\{(\d)\}x_\{(\d)\}/g, 'x_{$1} x_{$2}')
+    // Handle coefficients
+    .replace(/([+-]?)\s*(\d*\.?\d+)\s*\\cdot/g, '$1 $2 \\cdot')
+    // Clean up signs
+    .replace(/\+\s*-/g, '- ')
+    .replace(/\+\s+/g, ' + ')
+    .replace(/-\s+/g, ' - ');
+
+  // Handle special case: no explicit coefficient (should be 1)
+  // This is handled by the regex above
+
+  return `\\frac{d${lhs.replace('d', '').replace('/dt', '')}}{dt} = ${latex}`;
+}
+
+// Parse SINDy equation string into HTML (fallback for non-LaTeX view)
 function formatEquationHTML(eq, index) {
   const color = index === 0 ? 'var(--accent-primary)' : 'var(--accent-secondary)';
   const parts = eq.split('=');
@@ -64,12 +115,7 @@ function EquationDisplay({ results, config }) {
   }
 
   const getLaTeX = () => {
-    return equations.map(eq =>
-      eq
-        .replace(/d(\w+)\/dt = /, '\\frac{d$1}{dt} = ')
-        .replace(/\*/g, '\\cdot ')
-        .replace(/(\d+\.?\d*)/g, '$1')
-    ).join(' \\\\ ')
+    return equations.map(eq => parseEquationToLatex(eq)).join(' \\\\ ')
   }
 
   const getPlainText = () => {
@@ -166,7 +212,7 @@ function EquationDisplay({ results, config }) {
                     }}>
                       d{['Hare', 'Lynx'][i]}/dt
                     </div>
-                    <div dangerouslySetInnerHTML={{ __html: formatEquationHTML(eq, i) }} />
+                    <KatexEquation latex={parseEquationToLatex(eq)} />
                   </div>
                 ))}
               </div>
@@ -182,13 +228,13 @@ function EquationDisplay({ results, config }) {
                   }}>
                     {eq
                       .split(' ')
-                      .map(token => {
-                        if (/^\d+\.?\d*$/.test(token)) return <span key={token} style={{color: 'var(--accent-tertiary)', fontWeight: '600'}}>{token}</span>
-                        if (/^[+-]$/.test(token)) return <span key={token} style={{color: 'var(--fg-muted)'}}>{token}</span>
-                        if (/^[a-zA-Z]+\d*$/.test(token)) return <span key={token} style={{color: 'var(--fg-primary)', fontStyle: 'italic'}}>{token}</span>
-                        if (token === '=') return <span key={token} style={{color: 'var(--fg-secondary)'}}>{token}</span>
-                        if (token === '*') return <span key={token} style={{color: 'var(--fg-muted)'}}>·</span>
-                        return <span key={token}>{token}</span>
+                      .map((token, idx) => {
+                        if (/^\d+\.?\d*$/.test(token)) return <span key={`num-${idx}`} style={{color: 'var(--accent-tertiary)', fontWeight: '600'}}>{token}</span>
+                        if (/^[+-]$/.test(token)) return <span key={`sign-${idx}`} style={{color: 'var(--fg-muted)'}}>{token}</span>
+                        if (/^[a-zA-Z]+\d*$/.test(token)) return <span key={`var-${idx}`} style={{color: 'var(--fg-primary)', fontStyle: 'italic'}}>{token}</span>
+                        if (token === '=') return <span key={`eq-${idx}`} style={{color: 'var(--fg-secondary)'}}>{token}</span>
+                        if (token === '*') return <span key={`mul-${idx}`} style={{color: 'var(--fg-muted)'}}>·</span>
+                        return <span key={`other-${idx}`}>{token}</span>
                       })
                     }
                   </div>
