@@ -1,5 +1,5 @@
-import React, { useRef, useEffect, useState } from 'react'
-import { Link2, Download, Copy, Check, ExternalLink, RefreshCw, Code, FileText, Share2, Database, Target, TrendingUp } from 'lucide-react'
+import React, { useRef, useEffect, useState, useMemo } from 'react'
+import { Link2, Download, Copy, Check, ExternalLink, RefreshCw, Code, FileText, Share2, Database, Target, TrendingUp, FlaskConical, BarChart2 } from 'lucide-react'
 import * as d3 from 'd3'
 
 // Parse SINDy equation string into HTML
@@ -64,7 +64,7 @@ function ResultsPanel({ data, results, config, active, loading }) {
   const predictionRef = useRef(null)
   const variableLegendRef = useRef(null)
   const predictionTrajectoryRef = useRef(null)
-  const [viewMode, setViewMode] = useState('phase') // 'phase' | 'timeseries' | 'residuals' | 'legend' | 'prediction'
+  const [viewMode, setViewMode] = useState('phase') // 'phase' | 'timeseries' | 'residuals' | 'legend' | 'validation'
   const [copied, setCopied] = useState(false)
 
   useEffect(() => {
@@ -73,8 +73,8 @@ function ResultsPanel({ data, results, config, active, loading }) {
     else if (viewMode === 'timeseries') renderTimeSeriesComparison()
     else if (viewMode === 'residuals') renderResiduals()
     else if (viewMode === 'legend') renderVariableLegend()
-    else if (viewMode === 'prediction') renderPrediction()
-  }, [active, data, results, viewMode])
+    else if (viewMode === 'validation') renderValidation()
+  }, [active, data, results, viewMode, linearRegMetrics, odeMetrics])
 
   const renderPhasePortrait = () => {
     const container = phaseRef.current
@@ -636,7 +636,7 @@ function ResultsPanel({ data, results, config, active, loading }) {
     }
   }
 
-const renderPrediction = () => {
+const renderValidation = () => {
     const container = predictionTrajectoryRef.current
     if (!container) return
 
@@ -654,29 +654,58 @@ const renderPrediction = () => {
       .append('g')
       .attr('transform', `translate(${margin.left},${margin.top})`)
 
-    // Get prediction data from results
-    const predData = results?.prediction || {}
-    const t_pred = predData.t_pred || []
-    const X_pred = predData.X_pred || []
-    const t_test = results?.data?.t_test || []
-    const X_test = results?.data?.X_test || []
+    // Get data
     const t_train = results?.data?.t_train || []
     const X_train = results?.data?.X_train || []
-
-    // All observed data
+    const t_test = results?.data?.t_test || []
+    const X_test = results?.data?.X_test || []
     const t_all = data.map(d => d.Year)
     const hare_all = data.map(d => d.Hare)
     const lynx_all = data.map(d => d.Lynx)
+
+    // Linear regression predictions
+    const linPred = linearRegMetrics.predictions || {}
+    const t_test_lin = linPred.t_test || []
+    const harePredLin = linPred.harePred || []
+    const lynxPredLin = linPred.lynxPred || []
+    const hareTrueLin = linPred.hareTrue || []
+    const lynxTrueLin = linPred.lynxTrue || []
+
+    // ODE predictions
+    const odePred = odeMetrics.predictions || {}
+    const t_test_ode = odePred.t_test || []
+    const harePredOde = odePred.harePred || []
+    const lynxPredOde = odePred.lynxPred || []
+    const hareTrueOde = odePred.hareTrue || []
+    const lynxTrueOde = odePred.lynxTrue || []
+
+    // Use test time points (should be same for both)
+    const testT = t_test_lin.length > 0 ? t_test_lin : t_test_ode
+    const hareTrue = hareTrueLin.length > 0 ? hareTrueLin : hareTrueOde
+    const lynxTrue = lynxTrueLin.length > 0 ? lynxTrueLin : lynxTrueOde
+
+    if (testT.length === 0) {
+      svg.append('text')
+        .attr('x', width/2).attr('y', height/2)
+        .attr('text-anchor', 'middle').attr('fill', 'var(--fg-muted)')
+        .style('font-size', '14px')
+        .text('No validation data available. Run analysis with train/test split.')
+      return
+    }
 
     // Scales
     const xScale = d3.scaleLinear().domain(d3.extent(t_all)).range([0, width])
     const yMax = d3.max([
       ...hare_all,
       ...lynx_all,
-      ...(X_pred.flat() || []),
-      ...(X_test.flat() || [])
-    ])
-    const yScale = d3.scaleLinear().domain([0, yMax * 1.1]).nice().range([height, 0])
+      ...harePredLin,
+      ...lynxPredLin,
+      ...harePredOde,
+      ...lynxPredOde,
+      ...hareTrue,
+      ...lynxTrue
+    ].filter(v => !isNaN(v)))
+    const yScale = d3.scaleLinear().domain([0, (yMax || 100) * 1.1]).nice().range([height, 0])
 
     // Grid
     svg.append('g')
@@ -695,7 +724,7 @@ const renderPrediction = () => {
       .selectAll('text').attr('fill', 'var(--fg-secondary)').style('font-size', '11px')
 
     // Train/test split line
-    if (t_train.length > 0 && t_test.length > 0) {
+    if (t_train.length > 0 && testT.length > 0) {
       const splitX = xScale(t_train[t_train.length - 1])
       svg.append('line')
         .attr('x1', splitX).attr('x2', splitX)
@@ -703,7 +732,7 @@ const renderPrediction = () => {
         .attr('stroke', 'var(--fg-muted)').attr('stroke-dasharray', '6,4').attr('stroke-width', 1.5)
 
       svg.append('text')
-        .attr('x', splitX - 40).attr('y', 15)
+        .attr('x', splitX - 35).attr('y', 15)
         .attr('fill', 'var(--fg-muted)').style('font-size', '10px').style('font-weight', '600')
         .text('Train')
       svg.append('text')
@@ -724,60 +753,80 @@ const renderPrediction = () => {
     svg.append('path')
       .datum(observedHare)
       .attr('fill', 'none').attr('stroke', 'var(--accent-primary)').attr('stroke-width', 2)
-      .attr('stroke-dasharray', '4,2').attr('d', line).attr('opacity', 0.6)
+      .attr('stroke-dasharray', '4,2').attr('d', line).attr('opacity', 0.5)
     svg.append('path')
       .datum(observedLynx)
       .attr('fill', 'none').attr('stroke', 'var(--accent-secondary)').attr('stroke-width', 2)
-      .attr('stroke-dasharray', '4,2').attr('d', line).attr('opacity', 0.6)
+      .attr('stroke-dasharray', '4,2').attr('d', line).attr('opacity', 0.5)
 
     // Observed points (train)
     if (X_train.length > 0) {
       svg.selectAll('.train-hare').data(X_train).enter().append('circle')
         .attr('cx', (d, i) => xScale(t_train[i]))
         .attr('cy', d => yScale(d[0]))
-        .attr('r', 3.5).attr('fill', 'var(--accent-primary)').attr('stroke', 'var(--bg-primary)').attr('stroke-width', 1.5)
+        .attr('r', 3).attr('fill', 'var(--accent-primary)').attr('stroke', 'var(--bg-primary)').attr('stroke-width', 1)
       svg.selectAll('.train-lynx').data(X_train).enter().append('circle')
         .attr('cx', (d, i) => xScale(t_train[i]))
         .attr('cy', d => yScale(d[1]))
-        .attr('r', 3.5).attr('fill', 'var(--accent-secondary)').attr('stroke', 'var(--bg-primary)').attr('stroke-width', 1.5)
+        .attr('r', 3).attr('fill', 'var(--accent-secondary)').attr('stroke', 'var(--bg-primary)').attr('stroke-width', 1)
     }
 
     // Observed points (test) - highlighted
-    if (X_test.length > 0) {
-      svg.selectAll('.test-hare').data(X_test).enter().append('circle')
-        .attr('cx', (d, i) => xScale(t_test[i]))
-        .attr('cy', d => yScale(d[0]))
-        .attr('r', 5).attr('fill', 'none').attr('stroke', 'var(--accent-primary)').attr('stroke-width', 2.5)
-      svg.selectAll('.test-lynx').data(X_test).enter().append('circle')
-        .attr('cx', (d, i) => xScale(t_test[i]))
-        .attr('cy', d => yScale(d[1]))
-        .attr('r', 5).attr('fill', 'none').attr('stroke', 'var(--accent-secondary)').attr('stroke-width', 2.5)
+    svg.selectAll('.test-hare').data(hareTrue).enter().append('circle')
+      .attr('cx', (d, i) => xScale(testT[i]))
+      .attr('cy', d => yScale(d))
+      .attr('r', 5).attr('fill', 'none').attr('stroke', 'var(--accent-primary)').attr('stroke-width', 2.5)
+    svg.selectAll('.test-lynx').data(lynxTrue).enter().append('circle')
+      .attr('cx', (d, i) => xScale(testT[i]))
+      .attr('cy', d => yScale(d))
+      .attr('r', 5).attr('fill', 'none').attr('stroke', 'var(--accent-secondary)').attr('stroke-width', 2.5)
+
+    // Linear Regression predictions (dotted lines)
+    if (harePredLin.length > 0) {
+      const linHare = { t: testT, y: harePredLin }
+      const linLynx = { t: testT, y: lynxPredLin }
+      svg.append('path')
+        .datum(linHare)
+        .attr('fill', 'none').attr('stroke', 'var(--accent-primary)').attr('stroke-width', 2.5)
+        .attr('stroke-dasharray', '6,4').attr('d', line).attr('opacity', 0.8)
+      svg.append('path')
+        .datum(linLynx)
+        .attr('fill', 'none').attr('stroke', 'var(--accent-secondary)').attr('stroke-width', 2.5)
+        .attr('stroke-dasharray', '6,4').attr('d', line).attr('opacity', 0.8)
+
+      // Linear regression points
+      svg.selectAll('.lin-hare').data(harePredLin).enter().append('circle')
+        .attr('cx', (d, i) => xScale(testT[i]))
+        .attr('cy', d => yScale(d))
+        .attr('r', 4).attr('fill', 'var(--accent-primary)').attr('opacity', 0.6).attr('stroke', 'var(--bg-primary)').attr('stroke-width', 1)
+      svg.selectAll('.lin-lynx').data(lynxPredLin).enter().append('circle')
+        .attr('cx', (d, i) => xScale(testT[i]))
+        .attr('cy', d => yScale(d))
+        .attr('r', 4).attr('fill', 'var(--accent-secondary)').attr('opacity', 0.6).attr('stroke', 'var(--bg-primary)').attr('stroke-width', 1)
     }
 
-    // Integrated prediction trajectory (solid lines)
-    if (X_pred.length > 0 && t_pred.length > 0) {
-      const predHare = { t: t_pred, y: X_pred.map(d => d[0]) }
-      const predLynx = { t: t_pred, y: X_pred.map(d => d[1]) }
-
+    // ODE predictions (solid lines)
+    if (harePredOde.length > 0) {
+      const odeHare = { t: testT, y: harePredOde }
+      const odeLynx = { t: testT, y: lynxPredOde }
       svg.append('path')
-        .datum(predHare)
+        .datum(odeHare)
         .attr('fill', 'none').attr('stroke', 'var(--accent-primary)').attr('stroke-width', 3)
         .attr('d', line)
       svg.append('path')
-        .datum(predLynx)
+        .datum(odeLynx)
         .attr('fill', 'none').attr('stroke', 'var(--accent-secondary)').attr('stroke-width', 3)
         .attr('d', line)
 
-      // Prediction points (sampled)
-      const step = Math.max(1, Math.floor(t_pred.length / 20))
-      svg.selectAll('.pred-hare').data(t_pred.filter((_, i) => i % step === 0)).enter().append('circle')
-        .attr('cx', (d, i) => xScale(d))
-        .attr('cy', (d, i) => yScale(X_pred[i * step][0]))
-        .attr('r', 3).attr('fill', 'var(--accent-primary)').attr('opacity', 0.8)
-      svg.selectAll('.pred-lynx').data(t_pred.filter((_, i) => i % step === 0)).enter().append('circle')
-        .attr('cx', (d, i) => xScale(d))
-        .attr('cy', (d, i) => yScale(X_pred[i * step][1]))
-        .attr('r', 3).attr('fill', 'var(--accent-secondary)').attr('opacity', 0.8)
+      // ODE points
+      svg.selectAll('.ode-hare').data(harePredOde).enter().append('circle')
+        .attr('cx', (d, i) => xScale(testT[i]))
+        .attr('cy', d => yScale(d))
+        .attr('r', 4).attr('fill', 'var(--accent-primary)').attr('stroke', 'var(--bg-primary)').attr('stroke-width', 1.5)
+      svg.selectAll('.ode-lynx').data(lynxPredOde).enter().append('circle')
+        .attr('cx', (d, i) => xScale(testT[i]))
+        .attr('cy', d => yScale(d))
+        .attr('r', 4).attr('fill', 'var(--accent-secondary)').attr('stroke', 'var(--bg-primary)').attr('stroke-width', 1.5)
     }
 
     // Labels
@@ -787,14 +836,13 @@ const renderPrediction = () => {
       .attr('text-anchor', 'middle').attr('fill', 'var(--fg-secondary)').style('font-size', '12px').text('Population (k pelts)')
 
     // Legend
-    const legend = svg.append('g').attr('transform', `translate(${width - 180}, 20)`)
+    const legend = svg.append('g').attr('transform', `translate(${width - 200}, 20)`)
     const items = [
-      { label: 'Hare (observed)', color: 'var(--accent-primary)', dash: '4,2', r: 3.5, fill: 'var(--accent-primary)' },
-      { label: 'Lynx (observed)', color: 'var(--accent-secondary)', dash: '4,2', r: 3.5, fill: 'var(--accent-secondary)' },
-      { label: 'Hare (test)', color: 'var(--accent-primary)', dash: null, r: 5, fill: 'none', strokeWidth: 2.5 },
-      { label: 'Lynx (test)', color: 'var(--accent-secondary)', dash: null, r: 5, fill: 'none', strokeWidth: 2.5 },
-      { label: 'Hare (predicted)', color: 'var(--accent-primary)', dash: null, r: 3, fill: 'var(--accent-primary)' },
-      { label: 'Lynx (predicted)', color: 'var(--accent-secondary)', dash: null, r: 3, fill: 'var(--accent-secondary)' }
+      { label: 'Hare (observed)', color: 'var(--accent-primary)', dash: '4,2', r: 3, fill: 'var(--accent-primary)' },
+      { label: 'Lynx (observed)', color: 'var(--accent-secondary)', dash: '4,2', r: 3, fill: 'var(--accent-secondary)' },
+      { label: 'Test Data (actual)', color: 'var(--fg-primary)', dash: null, r: 5, fill: 'none', strokeWidth: 2.5 },
+      { label: 'Linear Regression (statistical)', color: 'var(--warning)', dash: '6,4', r: 4, fill: 'var(--warning)', strokeWidth: 2.5 },
+      { label: 'ODE Model (physics-based)', color: 'var(--success)', dash: null, r: 4, fill: 'var(--success)', strokeWidth: 3 }
     ]
     items.forEach((item, i) => {
       const g = legend.append('g').attr('transform', `translate(0, ${i * 22})`)
@@ -813,45 +861,87 @@ const renderPrediction = () => {
       g.append('text').attr('x', 32).attr('y', 4).attr('fill', 'var(--fg-secondary)').style('font-size', '10px').text(item.label)
     })
 
-    // Metrics display
-    const trajMetrics = predData.trajectory_metrics || {}
-    if (Object.keys(trajMetrics).length > 0) {
-      const hareMetrics = trajMetrics.feature_0 || {}
-      const lynxMetrics = trajMetrics.feature_1 || {}
-      const overall = trajMetrics.overall || {}
+    // Metrics comparison display
+    const linHare = linearRegMetrics.hare || {}
+    const linLynx = linearRegMetrics.lynx || {}
+    const linOverall = linearRegMetrics.overall || {}
+    const odeHareM = odeMetrics.hare || {}
+    const odeLynxM = odeMetrics.lynx || {}
+    const odeOverallM = odeMetrics.overall || {}
 
-      let metricY = height - 100
-      svg.append('text')
-        .attr('x', width - 10).attr('y', metricY)
-        .attr('text-anchor', 'end').attr('fill', 'var(--fg-primary)')
-        .style('font-size', '11px').style('font-weight', '600')
-        .text('Trajectory Metrics (Test Set):')
+    let metricY = height - 120
+    svg.append('text')
+      .attr('x', width - 10).attr('y', metricY)
+      .attr('text-anchor', 'end').attr('fill', 'var(--fg-primary)')
+      .style('font-size', '11px').style('font-weight', '600')
+      .text('Validation Metrics (Test Set):')
 
-      metricY += 18
-      svg.append('text')
-        .attr('x', width - 10).attr('y', metricY)
-        .attr('text-anchor', 'end').attr('fill', 'var(--fg-secondary)')
-        .style('font-size', '10px')
-        .text(`Overall R²: ${overall.trajectory_R2?.toFixed(3) || 'N/A'} | RMSE: ${overall.trajectory_RMSE?.toFixed(2) || 'N/A'}`)
+    metricY += 16
+    svg.append('text')
+      .attr('x', width - 10).attr('y', metricY)
+      .attr('text-anchor', 'end').attr('fill', 'var(--fg-muted)')
+      .style('font-size', '10px').style('font-weight', '600')
+      .text('Statistical (Linear Reg)')
 
-      metricY += 16
-      svg.append('text')
-        .attr('x', width - 10).attr('y', metricY)
-        .attr('text-anchor', 'end').attr('fill', 'var(--accent-primary)')
-        .style('font-size', '10px')
-        .text(`Hare R²: ${hareMetrics.trajectory_R2?.toFixed(3) || 'N/A'} | RMSE: ${hareMetrics.trajectory_RMSE?.toFixed(2) || 'N/A'}`)
+    metricY += 14
+    svg.append('text')
+      .attr('x', width - 10).attr('y', metricY)
+      .attr('text-anchor', 'end').attr('fill', 'var(--warning)')
+      .style('font-size', '10px')
+      .text(`Overall R²: ${linOverall.R2?.toFixed(3) || 'N/A'} | RMSE: ${linOverall.RMSE?.toFixed(2) || 'N/A'}`)
 
-      metricY += 16
-      svg.append('text')
-        .attr('x', width - 10).attr('y', metricY)
-        .attr('text-anchor', 'end').attr('fill', 'var(--accent-secondary)')
-        .style('font-size', '10px')
-        .text(`Lynx R²: ${lynxMetrics.trajectory_R2?.toFixed(3) || 'N/A'} | RMSE: ${lynxMetrics.trajectory_RMSE?.toFixed(2) || 'N/A'}`)
-    }
+    metricY += 14
+    svg.append('text')
+      .attr('x', width - 10).attr('y', metricY)
+      .attr('text-anchor', 'end').attr('fill', 'var(--accent-primary)')
+      .style('font-size', '10px')
+      .text(`Hare R²: ${linHare.R2?.toFixed(3) || 'N/A'} | RMSE: ${linHare.RMSE?.toFixed(2) || 'N/A'}`)
 
-    svg.append('text').attr('x', width/2).attr('y', -10)
-      .attr('text-anchor', 'middle').attr('fill', 'var(--fg-primary)').style('font-size', '13px').style('font-weight', '600')
-      .text('ODE Trajectory Prediction vs Test Data')
+    metricY += 14
+    svg.append('text')
+      .attr('x', width - 10).attr('y', metricY)
+      .attr('text-anchor', 'end').attr('fill', 'var(--accent-secondary)')
+      .style('font-size', '10px')
+      .text(`Lynx R²: ${linLynx.R2?.toFixed(3) || 'N/A'} | RMSE: ${linLynx.RMSE?.toFixed(2) || 'N/A'}`)
+
+    metricY += 18
+    svg.append('text')
+      .attr('x', width - 10).attr('y', metricY)
+      .attr('text-anchor', 'end').attr('fill', 'var(--fg-muted)')
+      .style('font-size', '10px').style('font-weight', '600')
+      .text('Physics-based (ODE/SINDy)')
+
+    metricY += 14
+    svg.append('text')
+      .attr('x', width - 10).attr('y', metricY)
+      .attr('text-anchor', 'end').attr('fill', 'var(--success)')
+      .style('font-size', '10px')
+      .text(`Overall R²: ${odeOverallM.R2?.toFixed(3) || 'N/A'} | RMSE: ${odeOverallM.RMSE?.toFixed(2) || 'N/A'}`)
+
+    metricY += 14
+    svg.append('text')
+      .attr('x', width - 10).attr('y', metricY)
+      .attr('text-anchor', 'end').attr('fill', 'var(--accent-primary)')
+      .style('font-size', '10px')
+      .text(`Hare R²: ${odeHareM.R2?.toFixed(3) || 'N/A'} | RMSE: ${odeHareM.RMSE?.toFixed(2) || 'N/A'}`)
+
+    metricY += 14
+    svg.append('text')
+      .attr('x', width - 10).attr('y', metricY)
+      .attr('text-anchor', 'end').attr('fill', 'var(--accent-secondary)')
+      .style('font-size', '10px')
+      .text(`Lynx R²: ${odeLynxM.R2?.toFixed(3) || 'N/A'} | RMSE: ${odeLynxM.RMSE?.toFixed(2) || 'N/A'}`)
+
+    // Insight text
+    const odeBetter = (odeOverallM.R2 || 0) > (linOverall.R2 || 0)
+    svg.append('text')
+      .attr('x', width/2).attr('y', -10)
+      .attr('text-anchor', 'middle').attr('fill', odeBetter ? 'var(--success)' : 'var(--warning)')
+      .style('font-size', '12px').style('font-weight', '600')
+      .text(odeBetter
+        ? '✓ ODE model outperforms statistical model — governing equations capture system dynamics!'
+        : '⚠ Statistical model fits test data better — ODE may need refinement'
+      )
   }
 
   const copyLaTeX = () => {
@@ -880,6 +970,167 @@ const renderPrediction = () => {
     a.click()
     URL.revokeObjectURL(url)
   }
+
+  // ========== VALIDATION COMPUTATIONS ==========
+
+  // Linear Regression (Simple Statistical Model)
+  const linearRegMetrics = useMemo(() => {
+    const t_train = results?.data?.t_train || []
+    const X_train = results?.data?.X_train || []
+    const t_test = results?.data?.t_test || []
+    const X_test = results?.data?.X_test || []
+
+    if (t_train.length === 0 || X_train.length === 0 || t_test.length === 0 || X_test.length === 0) {
+      return { hare: {}, lynx: {}, overall: {} }
+    }
+
+    // Fit simple linear regression: X ~ t (polynomial degree 2 for trend)
+    const fitPoly = (t, y, degree = 2) => {
+      const n = t.length
+      const A = []
+      for (let i = 0; i < n; i++) {
+        const row = []
+        for (let d = 0; d <= degree; d++) {
+          row.push(Math.pow(t[i], d))
+        }
+        A.push(row)
+      }
+      // Solve using normal equations: (A^T A) x = A^T y
+      const AT = A[0].map((_, i) => A.map(row => row[i]))
+      const ATA = AT.map(row => AT.map(col =>
+        row.reduce((sum, val, k) => sum + val * col[k], 0)
+      ))
+      const ATy = AT.map(row =>
+        row.reduce((sum, val, k) => sum + val * y[k], 0)
+      )
+      // Gaussian elimination
+      const nCoeff = degree + 1
+      const aug = ATA.map((row, i) => [...row, ATy[i]])
+      for (let i = 0; i < nCoeff; i++) {
+        // Find pivot
+        let maxRow = i
+        for (let r = i + 1; r < nCoeff; r++) {
+          if (Math.abs(aug[r][i]) > Math.abs(aug[maxRow][i])) maxRow = r
+        }
+        if (Math.abs(aug[maxRow][i]) < 1e-10) return Array(degree + 1).fill(0)
+        if (maxRow !== i) [aug[i], aug[maxRow]] = [aug[maxRow], aug[i]]
+        // Normalize
+        const pivot = aug[i][i]
+        for (let j = i; j <= nCoeff; j++) aug[i][j] /= pivot
+        // Eliminate
+        for (let r = 0; r < nCoeff; r++) {
+          if (r !== i) {
+            const factor = aug[r][i]
+            for (let j = i; j <= nCoeff; j++) aug[r][j] -= factor * aug[i][j]
+          }
+        }
+      }
+      return aug.map(row => row[nCoeff])
+    }
+
+    const evalPoly = (coeff, t) => {
+      return coeff.reduce((sum, c, d) => sum + c * Math.pow(t, d), 0)
+    }
+
+    // Fit for Hare and Lynx separately
+    const hare_y = X_train.map(d => d[0])
+    const lynx_y = X_train.map(d => d[1])
+
+    const hareCoeff = fitPoly(t_train, hare_y)
+    const lynxCoeff = fitPoly(t_train, lynx_y)
+
+    // Predict on test set
+    const harePred = t_test.map(t => evalPoly(hareCoeff, t))
+    const lynxPred = t_test.map(t => evalPoly(lynxCoeff, t))
+    const hareTrue = X_test.map(d => d[0])
+    const lynxTrue = X_test.map(d => d[1])
+
+    // Compute metrics
+    const computeMetrics = (trueVals, predVals) => {
+      const residuals = trueVals.map((v, i) => v - predVals[i])
+      const rss = residuals.reduce((sum, r) => sum + r * r, 0)
+      const meanTrue = trueVals.reduce((a, b) => a + b, 0) / trueVals.length
+      const tss = trueVals.reduce((sum, v) => sum + (v - meanTrue) ** 2, 0)
+      return {
+        R2: tss > 0 ? 1 - rss / tss : 0,
+        RMSE: Math.sqrt(rss / trueVals.length),
+        MAE: residuals.reduce((sum, r) => sum + Math.abs(r), 0) / trueVals.length,
+        MaxError: Math.max(...residuals.map(Math.abs))
+      }
+    }
+
+    const hareMetrics = computeMetrics(hareTrue, harePred)
+    const lynxMetrics = computeMetrics(lynxTrue, lynxPred)
+
+    const allTrue = [...hareTrue, ...lynxTrue]
+    const allPred = [...harePred, ...lynxPred]
+    const overallMetrics = computeMetrics(allTrue, allPred)
+
+    return {
+      hare: hareMetrics,
+      lynx: lynxMetrics,
+      overall: overallMetrics,
+      predictions: { t_test, harePred, lynxPred, hareTrue, lynxTrue }
+    }
+  }, [results])
+
+  // ODE Integration for validation (using discovered equations from server)
+  const odeMetrics = useMemo(() => {
+    const predData = results?.prediction || {}
+    const t_pred = predData.t_pred || []
+    const X_pred = predData.X_pred || []
+    const t_test = results?.data?.t_test || []
+    const X_test = results?.data?.X_test || []
+
+    if (t_pred.length === 0 || X_pred.length === 0 || t_test.length === 0 || X_test.length === 0) {
+      return { hare: {}, lynx: {}, overall: {} }
+    }
+
+    // Interpolate ODE predictions to test time points
+    const interp = (t_src, y_src, t_target) => {
+      if (t_src.length < 2) return t_target.map(() => NaN)
+      return t_target.map(t => {
+        // Find interval
+        let i = 0
+        while (i < t_src.length - 1 && t_src[i + 1] < t) i++
+        if (t_src[i] === t_src[i + 1]) return y_src[i]
+        const alpha = (t - t_src[i]) / (t_src[i + 1] - t_src[i])
+        return y_src[i] * (1 - alpha) + y_src[i + 1] * alpha
+      })
+    }
+
+    const harePred = interp(t_pred, X_pred.map(d => d[0]), t_test)
+    const lynxPred = interp(t_pred, X_pred.map(d => d[1]), t_test)
+    const hareTrue = X_test.map(d => d[0])
+    const lynxTrue = X_test.map(d => d[1])
+
+    const computeMetrics = (trueVals, predVals) => {
+      const residuals = trueVals.map((v, i) => v - predVals[i])
+      const rss = residuals.reduce((sum, r) => sum + r * r, 0)
+      const meanTrue = trueVals.reduce((a, b) => a + b, 0) / trueVals.length
+      const tss = trueVals.reduce((sum, v) => sum + (v - meanTrue) ** 2, 0)
+      return {
+        R2: tss > 0 ? 1 - rss / tss : 0,
+        RMSE: Math.sqrt(rss / trueVals.length),
+        MAE: residuals.reduce((sum, r) => sum + Math.abs(r), 0) / trueVals.length,
+        MaxError: Math.max(...residuals.map(Math.abs))
+      }
+    }
+
+    const hareMetrics = computeMetrics(hareTrue, harePred)
+    const lynxMetrics = computeMetrics(lynxTrue, lynxPred)
+
+    const allTrue = [...hareTrue, ...lynxTrue]
+    const allPred = [...harePred, ...lynxPred]
+    const overallMetrics = computeMetrics(allTrue, allPred)
+
+    return {
+      hare: hareMetrics,
+      lynx: lynxMetrics,
+      overall: overallMetrics,
+      predictions: { t_test, harePred, lynxPred, hareTrue, lynxTrue }
+    }
+  }, [results])
 
   if (!active) return null
 
@@ -996,12 +1247,12 @@ const renderPrediction = () => {
               Variable Legend
             </button>
             <button
-              className={`tab ${viewMode === 'prediction' ? 'active' : ''}`}
-              onClick={() => setViewMode('prediction')}
+              className={`tab ${viewMode === 'validation' ? 'active' : ''}`}
+              onClick={() => setViewMode('validation')}
               role="tab"
             >
-              <TrendingUp className="w-4 h-4" style={{marginRight: '0.25rem'}} />
-              Prediction
+              <BarChart2 className="w-4 h-4" style={{marginRight: '0.25rem'}} />
+              Validation
             </button>
           </div>
         </div>
@@ -1010,7 +1261,7 @@ const renderPrediction = () => {
           <div ref={phaseRef} style={{width: '100%', height: '100%', display: viewMode === 'phase' ? 'block' : 'none'}} />
           <div ref={predictionRef} style={{width: '100%', height: '100%', display: (viewMode === 'timeseries' || viewMode === 'residuals') ? 'block' : 'none'}} />
           <div ref={variableLegendRef} style={{width: '100%', height: '100%', display: viewMode === 'legend' ? 'block' : 'none'}} />
-          <div ref={predictionTrajectoryRef} style={{width: '100%', height: '100%', display: viewMode === 'prediction' ? 'block' : 'none'}} />
+          <div ref={predictionTrajectoryRef} style={{width: '100%', height: '100%', display: viewMode === 'validation' ? 'block' : 'none'}} />
         </div>
       </div>
 
